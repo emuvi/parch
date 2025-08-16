@@ -1,5 +1,4 @@
 import os
-import sys
 
 def rename_all_files(folder, starts_with, rename_for):
     if not os.path.isdir(folder):
@@ -27,7 +26,7 @@ def rename_all_files(folder, starts_with, rename_for):
     print(f"File renaming complete. Renamed {renamed_count} file(s).")
     if (len(errors) > 0):
         print("-" * 50)
-        print(f"Erros:")
+        print("Erros:")
         for error in errors:
             print(error)
     
