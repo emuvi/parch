@@ -3,7 +3,6 @@ import random
 import subprocess
 import platform
 
-
 def get_all_sub_folders(path):
     all_sub_folders = []
     for dirpath, dirnames, filenames in os.walk(path):
