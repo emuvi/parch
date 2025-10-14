@@ -3,7 +3,7 @@ import pyperclip
 
 def del_citations(text):
     text = re.sub(r'\[cite_start\]', '', text)
-    text = re.sub(r'\[cite\:\s+\d+\]', '', text)
+    text = re.sub(r'\[cite:\s*\d+(?:\s*,\s*\d+)*\]', '', text)
     return text
 
 def main():
