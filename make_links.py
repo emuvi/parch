@@ -2,8 +2,8 @@ from pathlib import Path
 
 PREFIX = "https://concursos.estrategia.com/cast/album/"
 SUFFIX = "/"
-START = 2909
-END = 3300
+START = 3301
+END = 3400
 OUTFILE = Path("links_{}_{}.html".format(START, END))
 
 def build_html(prefix: str, suffix: str, start: int, end: int) -> str:
