@@ -37,9 +37,9 @@ def main():
 
         random_folder = random.choice(folders_to_choose_from)
         print("\n---")
-        user_choice = input(f"Sub folder sorted: '{random_folder}'. Do you want to open it? (*/n):").lower()
+        user_choice = input(f"Sub folder sorted: '{random_folder}'. Do you want to open it? (y/*):").lower()
 
-        if user_choice != 'n':
+        if user_choice == 'y':
             full_path = os.path.join(current_directory, random_folder)
             print(f"Opening the folder: {full_path}")
             open_folder_in_explorer(full_path)
