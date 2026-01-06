@@ -3,7 +3,7 @@ import random
 import shutil
 
 # Configuração do script
-total_to_get = 300
+total_to_get = 30
 file_extension = ".pdf"
 root_dir = os.getcwd()
 get_on_dir = os.path.join(root_dir, 'body')
@@ -55,5 +55,21 @@ for file_path in selected_files:
             counter += 1
 
     shutil.copy(file_path, dest_path)
+    print(f"Copiado: {file_path} -> {dest_path}")
+
 
 print(f"\nConcluído! {len(selected_files)} arquivos foram copiados com sucesso.")
+
+excluir = input("\nDeseja excluir os arquivos de origem dos quais foram copiados? (s/n): ").strip().lower()
+if excluir in ['s', 'sim', 'y', 'yes']:
+    print("Excluindo arquivos de origem...")
+    for file_path in selected_files:
+        try:
+            os.remove(file_path)
+            print(f"Excluído: {file_path}")
+        except OSError as e:
+            print(f"Erro ao excluir '{file_path}': {e}")
+    print("Arquivos de origem excluídos.")
+
+print("Terminado.")
+input()
