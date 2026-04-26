@@ -91,7 +91,7 @@ def synchronize_folders(source_folder, destination_folder):
 # ==========================================
 if __name__ == "__main__":
     # Define the paths to your folders here (you can use absolute or relative paths)
-    source = "./my_source_folder"
-    destination = "./my_destination_folder"
+    source = os.environ.get("MIRROR_FOLDERS_SOURCE", "./my_source_folder")
+    destination = os.environ.get("MIRROR_FOLDERS_DESTINATION", "./my_destination_folder")
     
     synchronize_folders(source, destination)
