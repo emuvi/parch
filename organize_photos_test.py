@@ -73,7 +73,7 @@ def organize_files(root_folder, dry_run=True):
 
 if __name__ == "__main__":
     # Root folder path
-    root_folder = r"d:\Cloud\emuvi\OneDrive\Imagens\Camera Roll"
+    root_folder = r"."
     
     # Run in dry-run mode first
     print("Running in dry-run mode...")
