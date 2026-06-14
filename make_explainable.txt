@@ -1,0 +1,3 @@
+Make this scripts better divided in proper functions with each one of them with well made documentation.
+At each step of each function print to the user what is happening.
+At each step treat every possible error and print proper error messages.
