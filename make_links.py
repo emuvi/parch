@@ -1,11 +1,5 @@
 from pathlib import Path
 
-PREFIX = "https://concursos.estrategia.com/cast/album/"
-SUFFIX = "/"
-START = 3301
-END = 3400
-OUTFILE = Path("links_{}_{}.html".format(START, END))
-
 def build_html(prefix: str, suffix: str, start: int, end: int) -> str:
     links = [f"{prefix}{n}{suffix}" for n in range(start, end + 1)]
     items = "\n    ".join(f'<li><a href="{u}" target="_blank">{u}</a></li>' for u in links)
@@ -25,10 +19,21 @@ def build_html(prefix: str, suffix: str, start: int, end: int) -> str:
 </body>
 </html>"""
 
-def main():
-    html = build_html(PREFIX, SUFFIX, START, END)
-    OUTFILE.write_text(html, encoding="utf-8")
-    print(f"File made: {OUTFILE.resolve()} ({END-START+1} links)")
+def input_make():
+    prefix = input("Enter PREFIX (e.g., https://example.com/cast/album/): ")
+    suffix = input("Enter SUFFIX (e.g., /): ")
+    
+    try:
+        start = int(input("Enter START (e.g., 3301): "))
+        end = int(input("Enter END (e.g., 3400): "))
+    except ValueError:
+        print("Error: START and END must be valid integer numbers.")
+        return
+
+    outfile = Path(f"links_{start}_{end}.html")
+    html = build_html(prefix, suffix, start, end)
+    outfile.write_text(html, encoding="utf-8")
+    print(f"File made: {outfile.resolve()} ({end-start+1} links)")
 
 if __name__ == "__main__":
-    main()
+    input_make()
