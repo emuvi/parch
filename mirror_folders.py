@@ -7,6 +7,10 @@ def synchronize_folders(source_folder, destination_folder):
     The modification check is based exclusively on file size.
     Files and folders existing in the destination but not in the source will be deleted.
     """
+    print("\n🔄 Starting synchronization")
+    print(f"Source folder:      {source_folder}")
+    print(f"Destination folder: {destination_folder}\n")
+
     # Initialize operation counters
     operations = {
         "folders_created": 0,
@@ -125,6 +129,9 @@ if __name__ == "__main__":
     # Print summary of operations
     print("\n" + "="*50)
     print("📊 OPERATION SUMMARY")
+    print("="*50)
+    print(f"Source folder:      {source}")
+    print(f"Destination folder: {destination}")
     print("="*50)
     print(f"📁 Folders created:        {operations['folders_created']}")
     print(f"📄 Files copied:           {operations['files_copied']}")
