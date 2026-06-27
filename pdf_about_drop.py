@@ -13,7 +13,7 @@ from lmstd import LMStd, ChatResponse
 
 # Initialize the LM Studio client pointing to the local LM Studio server.
 # Based on renamer.py configuration
-client = LMStd(base_url="http://pointel.pointto.us:6427",
+client = LMStd(base_url=os.environ.get("LMSTD_HOST", "http://localhost:1234"),
                api_token=os.environ.get("LMSTD_APIKEY"))
 
 
