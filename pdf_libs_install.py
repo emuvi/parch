@@ -6,8 +6,8 @@ import os
 def install_packages():
     """Install required Python packages from the internet."""
     packages = [
-        "PyPDF2",
         "lmstd",
+        "PyPDF2",
         "PyQt5"
     ]
 
