@@ -753,7 +753,7 @@ class DropZone(QLabel):
             print_step("Initializing DropZone widget.")
             super().__init__()
             self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.setText("Drag and Drop\nPDF File Here")
+            self.setText("Drag and Drop PDF File Here\n\n🔹 Action: Catalog Metadata\n(Extracts metadata and renames file)")
             self.setStyleSheet('''
                 QLabel {
                     border: 4px dashed #aaa;
