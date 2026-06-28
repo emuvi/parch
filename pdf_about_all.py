@@ -8,56 +8,87 @@ from typing import Optional, List, Any
 from lmstd import LMStd, ChatResponse
 
 # Initialize the LM Studio client pointing to the local LM Studio server.
-# Based on renamer.py and pdf_about.py configuration
-client = LMStd(base_url=os.environ.get("LMSTD_HOST", "http://localhost:1234"),
-               api_token=os.environ.get("LMSTD_APIKEY"))
-
+try:
+    client = LMStd(base_url=os.environ.get("LMSTD_HOST", "http://localhost:1234"),
+                   api_token=os.environ.get("LMSTD_APIKEY"))
+except Exception as e:
+    print(f"🔴 [Error] Failed to initialize LMStd client: {e}")
+    sys.exit(1)
 
 def get_current_time() -> str:
     """
     Returns the current time formatted as HH:MM:SS.
-
+    
     Returns:
         str: Formatted current time string.
     """
     try:
         return datetime.now().strftime('%H:%M:%S')
     except Exception as e:
-        print(f"[Error] get_current_time failed: {e}")
+        print(f"🔴 [Error] get_current_time failed: {e}")
         return "00:00:00"
 
+def print_step(message: str) -> None:
+    """Prints a step in a process."""
+    try:
+        print(f"[{get_current_time()}] 🔹 [STEP] {message}")
+    except Exception as e:
+        print(f"[{get_current_time()}] 🔴 [Error] print_step failed: {e}")
 
-def log_message(message: str) -> None:
+def print_success(message: str) -> None:
+    """Prints a successful step completion."""
+    try:
+        print(f"[{get_current_time()}] ✅ [SUCCESS] {message}")
+    except Exception as e:
+        print(f"[{get_current_time()}] 🔴 [Error] print_success failed: {e}")
+
+def print_error(message: str) -> None:
+    """Prints an error message."""
+    try:
+        print(f"[{get_current_time()}] 🔴 [ERROR] {message}")
+    except Exception as e:
+        print(f"[{get_current_time()}] 🔴 [Error] print_error failed: {e}")
+
+def print_progress(current: int, total: int, prefix: str = '', suffix: str = '', decimals: int = 1, length: int = 50, fill: str = '█', printEnd: str = "\n") -> None:
     """
-    Logs a message to the console with a timestamp.
-
-    Args:
-        message (str): The message to log.
+    Call in a loop to create terminal progress bar.
     """
     try:
-        print(f"[{get_current_time()}] {message}")
+        if total == 0:
+            return
+        percent = ("{0:." + str(decimals) + "f}").format(100 * (current / float(total)))
+        filledLength = int(length * current // total)
+        bar = fill * filledLength + '-' * (length - filledLength)
+        print(f'[{get_current_time()}] 🔄 {prefix} |{bar}| {percent}% {suffix}', end=printEnd)
     except Exception as e:
-        print(f"[Error] log_message failed: {e}")
+        print_error(f"Failed to print progress: {e}")
 
+def print_summary_box(title: str, total: int, success: int, fails: int) -> None:
+    """
+    Prints a visually clear box summarizing the cycle.
+    """
+    try:
+        box_width = 50
+        print("\n" + "╔" + "═" * (box_width - 2) + "╗")
+        title_str = f" 📊 SUMMARY: {title} "
+        print("║" + title_str.center(box_width - 2) + "║")
+        print("╠" + "═" * (box_width - 2) + "╣")
+        print("║" + f" Total Items Processed : {total:<21}".ljust(box_width - 2) + "║")
+        print("║" + f" ✅ Successes          : {success:<21}".ljust(box_width - 2) + "║")
+        print("║" + f" 🔴 Failures           : {fails:<21}".ljust(box_width - 2) + "║")
+        print("╚" + "═" * (box_width - 2) + "╝\n")
+    except Exception as e:
+        print_error(f"Failed to print summary box: {e}")
 
 def get_pages_to_extract(total_pages: int) -> List[int]:
     """
-    Determines which pages to extract from a PDF based on the total number of pages.
-    Extracts up to 99 pages: first 33, middle 33, and last 33 if document is large.
-
-    Args:
-        total_pages (int): The total number of pages in the PDF.
-
-    Returns:
-        List[int]: A list of page numbers to extract.
+    Determines which pages to extract from a PDF based on total pages.
     """
-    log_message(
-        f"Determining pages to extract for a PDF with {total_pages} total pages.")
+    print_step(f"Determining pages to extract for a PDF with {total_pages} total pages.")
     pages_to_extract: List[int] = []
     try:
         if total_pages > 99:
-            log_message(
-                "PDF has more than 99 pages. Selecting first 33, middle 33, and last 33 pages.")
+            print_step("PDF has > 99 pages. Selecting first 33, middle 33, and last 33.")
             mid_start = (total_pages // 2) - 16
             pages_to_extract = sorted(set(
                 list(range(33)) +
@@ -65,103 +96,96 @@ def get_pages_to_extract(total_pages: int) -> List[int]:
                 list(range(total_pages - 33, total_pages))
             ))
         else:
-            log_message("PDF has 99 or fewer pages. Selecting all pages.")
+            print_step("PDF has <= 99 pages. Selecting all pages.")
             pages_to_extract = list(range(total_pages))
-        log_message(
-            f"Successfully determined {len(pages_to_extract)} pages to extract.")
+            
+        print_success(f"Successfully determined {len(pages_to_extract)} pages to extract.")
+        return pages_to_extract
     except Exception as e:
-        log_message(f"Error determining pages to extract: {e}")
-    return pages_to_extract
-
+        print_error(f"Error determining pages to extract: {e}")
+        return []
 
 def extract_text_from_pages(reader: PyPDF2.PdfReader, pages_to_extract: List[int]) -> str:
     """
     Extracts text from specified pages of a PDF reader object.
-
-    Args:
-        reader (PyPDF2.PdfReader): The PyPDF2 reader object.
-        pages_to_extract (List[int]): The list of page indices to extract text from.
-
-    Returns:
-        str: The extracted text.
+    Includes a progress cycle.
     """
-    log_message(
-        f"Extracting text from {len(pages_to_extract)} selected pages.")
+    total = len(pages_to_extract)
+    print_step(f"Starting extraction cycle for {total} selected pages.")
     text = ""
+    success_count = 0
+    fail_count = 0
+    
     try:
-        for page_num in pages_to_extract:
-            log_message(f"Extracting text from page {page_num + 1}...")
+        for idx, page_num in enumerate(pages_to_extract):
+            print_step(f"Extracting text from page {page_num + 1} (Index: {idx+1}/{total})")
             try:
                 page = reader.pages[page_num]
                 extracted = page.extract_text()
                 if extracted:
                     text += extracted + "\n"
+                success_count += 1
+                print_success(f"Extracted page {page_num + 1}")
             except Exception as page_err:
-                log_message(
-                    f"Error extracting text from page {page_num + 1}: {page_err}")
-        log_message(
-            f"Successfully extracted {len(text)} characters of text from the selected pages.")
+                print_error(f"Error extracting text from page {page_num + 1}: {page_err}")
+                fail_count += 1
+            
+            print_progress(idx + 1, total, prefix='Page Extraction Progress', suffix='Complete', length=30)
+            
+        print_success(f"Successfully finished text extraction loop. Total characters: {len(text)}")
+        print_summary_box("Page Extraction Cycle", total, success_count, fail_count)
+        return text.strip()
     except Exception as e:
-        log_message(f"Error during text extraction loop: {e}")
-    return text.strip()
-
+        print_error(f"Critical error during text extraction loop: {e}")
+        print_summary_box("Page Extraction Cycle (Interrupted)", total, success_count, fail_count)
+        return ""
 
 def extract_pdf_text(file_path: str) -> str:
     """
     Opens a PDF file and extracts text content from it.
-
-    Args:
-        file_path (str): The path to the PDF file.
-
-    Returns:
-        str: The extracted text.
     """
-    log_message(f"Starting text extraction for PDF file: '{file_path}'")
+    print_step(f"Starting text extraction for PDF file: '{file_path}'")
     text = ""
     try:
-        log_message(f"Opening file '{file_path}' in binary read mode.")
+        print_step(f"Opening file '{file_path}' in binary read mode.")
         with open(file_path, 'rb') as pdf_file:
-            log_message("Initializing PyPDF2 PdfReader.")
+            print_success("File opened successfully.")
+            
+            print_step("Initializing PyPDF2 PdfReader.")
             reader = PyPDF2.PdfReader(pdf_file)
             total_pages = len(reader.pages)
-            log_message(
-                f"PDF reader initialized successfully. Total pages found: {total_pages}.")
+            print_success(f"PDF reader initialized successfully. Total pages found: {total_pages}.")
 
+            print_step("Calling get_pages_to_extract.")
             pages_to_extract = get_pages_to_extract(total_pages)
             if not pages_to_extract:
-                log_message("No pages to extract. Aborting extraction.")
+                print_error("No pages to extract. Aborting extraction.")
                 return ""
-
+            
+            print_step("Calling extract_text_from_pages.")
             text = extract_text_from_pages(reader, pages_to_extract)
-
+            print_success("Text extraction completed.")
     except FileNotFoundError:
-        log_message(f"Error: File not found at '{file_path}'.")
+        print_error(f"File not found at '{file_path}'.")
     except PermissionError:
-        log_message(f"Error: Permission denied when accessing '{file_path}'.")
+        print_error(f"Permission denied when accessing '{file_path}'.")
     except Exception as e:
-        log_message(f"Error reading PDF '{file_path}': {e}")
+        print_error(f"Unexpected error reading PDF '{file_path}': {e}")
 
-    log_message("Text extraction process completed.")
     return text
-
 
 def build_summary_prompt(text: str) -> str:
     """
     Builds the prompt string for the LLM to generate a summary.
-
-    Args:
-        text (str): The extracted PDF text.
-
-    Returns:
-        str: The formatted prompt string.
     """
-    log_message("Building the prompt for the LLM.")
+    print_step("Building the prompt for the LLM.")
     prompt = ""
     try:
+        print_step("Truncating text to max 4000 chars.")
         truncated_text = text[:4000]
-        log_message(
-            f"Truncated text to {len(truncated_text)} characters for the prompt.")
+        print_success(f"Truncated text to {len(truncated_text)} characters.")
 
+        print_step("Constructing final prompt string.")
         prompt = (
             "Based on the following text extracted from a PDF, tell me what it is about "
             "in a maximum of 100 characters. Be concise and direct, providing only the summary "
@@ -170,181 +194,141 @@ def build_summary_prompt(text: str) -> str:
             "and ensure perfect spell checking on the language of the document.\n\n"
             f"### TEXT ###\n{truncated_text}"
         )
-        log_message("Prompt built successfully.")
+        print_success("Prompt built successfully.")
     except Exception as e:
-        log_message(f"Error building prompt: {e}")
+        print_error(f"Error building prompt: {e}")
     return prompt
-
 
 def get_summary_from_llm(prompt: str) -> Optional[str]:
     """
     Calls the Local LM Studio API to get a summary based on the prompt.
-
-    Args:
-        prompt (str): The prompt containing instructions and text.
-
-    Returns:
-        Optional[str]: The summary string generated by the LLM, or None if an error occurred.
     """
-    log_message("Calling the Local LM Studio API for a summary...")
+    print_step("Calling the Local LM Studio API for a summary.")
     content: Optional[str] = None
     try:
-        log_message("Sending chat request to LM Studio.")
+        print_step("Sending chat request to LM Studio.")
         response: ChatResponse = client.chat(
             system_prompt="You are a helpful assistant that summarizes documents extremely concisely for filenames. Always respond in the same language as the input text and ensure perfect spelling.",
             input_data=prompt,
             temperature=0.0
         )
-        log_message("Received response from LM Studio.")
+        print_success("Received response from LM Studio.")
 
+        print_step("Parsing response output.")
         if "output" in response:
-            log_message("Parsing response output.")
             for item in response.get("output", []):
                 if item.get("type") == "message":
                     content = item.get("content")
-                    log_message(
-                        "Successfully extracted message content from response.")
+                    print_success("Successfully extracted message content from response.")
                     break
 
         if not content:
-            log_message("Model returned an empty or invalid response.")
+            print_error("Model returned an empty or invalid response.")
             return None
-
+        
+        print_success(f"Final LLM content: {content.strip()}")
+        return content.strip()
     except Exception as e:
-        log_message(f"Error calling Local LM Studio API: {e}")
+        print_error(f"Error calling Local LM Studio API: {e}")
         return None
-
-    return content.strip()
-
 
 def sanitize_filename(summary: str) -> Optional[str]:
     """
     Cleans up the generated summary to be a valid and safe filename.
-
-    Args:
-        summary (str): The raw summary text.
-
-    Returns:
-        Optional[str]: The sanitized filename base, or None if invalid.
     """
-    log_message("Sanitizing the generated summary for use as a filename.")
+    print_step("Sanitizing the generated summary for use as a filename.")
     try:
-        log_message("Removing potential markdown formatting.")
+        print_step("Removing potential markdown formatting.")
         if summary.startswith("```"):
             summary = summary.split('\n', 1)[-1]
             if summary.endswith("```"):
                 summary = summary[:-3]
         summary = summary.strip()
 
-        log_message("Enforcing the 100 character limit.")
+        print_step("Enforcing the 100 character limit.")
         if len(summary) > 100:
             summary = summary[:100].strip()
 
-        log_message("Replacing invalid characters with underscores.")
+        print_step("Replacing invalid characters with underscores.")
         new_base_name = re.sub(r'[\\/*?:"<>|\n\r\t]', "_", summary)
 
-        log_message(
-            "Removing consecutive underscores and trailing/leading invalid characters.")
+        print_step("Removing consecutive underscores and trailing/leading invalid characters.")
         new_base_name = re.sub(r'_{2,}', "_", new_base_name).strip(" _.")
 
         if not new_base_name:
-            log_message(
-                "Sanitized summary is empty. Cannot use as a filename.")
+            print_error("Sanitized summary is empty. Cannot use as a filename.")
             return None
 
-        log_message(f"Successfully sanitized filename base: '{new_base_name}'")
+        print_success(f"Successfully sanitized filename base: '{new_base_name}'")
         return new_base_name
     except Exception as e:
-        log_message(f"Error sanitizing filename: {e}")
+        print_error(f"Error sanitizing filename: {e}")
         return None
-
 
 def get_unique_new_path(current_dir: str, new_base_name: str, original_path: str) -> Optional[str]:
     """
     Generates a unique file path by appending a counter if the file already exists.
-
-    Args:
-        current_dir (str): The directory containing the file.
-        new_base_name (str): The desired new base name for the file.
-        original_path (str): The original path of the file to be renamed.
-
-    Returns:
-        Optional[str]: A unique new file path, or None if an error occurred.
     """
-    log_message(
-        f"Generating a unique new file path for base name '{new_base_name}'.")
+    print_step(f"Generating a unique new file path for base name '{new_base_name}'.")
     try:
         new_file_name = f"{new_base_name}.pdf"
         new_path = os.path.join(current_dir, new_file_name)
 
-        log_message(f"Checking if path '{new_path}' already exists.")
+        print_step(f"Checking if path '{new_path}' already exists.")
         if os.path.exists(new_path) and original_path.lower() != new_path.lower():
-            log_message(
-                "Path already exists. Finding a unique filename with a counter.")
+            print_step("Path already exists. Finding a unique filename with a counter.")
             counter = 2
             while True:
                 new_file_name = f"{new_base_name} ({counter}).pdf"
                 new_path = os.path.join(current_dir, new_file_name)
                 if not os.path.exists(new_path) or original_path.lower() == new_path.lower():
-                    log_message(f"Found unique filename: '{new_file_name}'")
+                    print_success(f"Found unique filename: '{new_file_name}'")
                     break
                 counter += 1
         else:
-            log_message(f"Path '{new_path}' is available.")
+            print_success(f"Path '{new_path}' is available.")
 
         return new_path
     except Exception as e:
-        log_message(f"Error generating unique new path: {e}")
+        print_error(f"Error generating unique new path: {e}")
         return None
-
 
 def rename_file(old_path: str, new_path: str) -> bool:
     """
     Renames a file from old_path to new_path.
-
-    Args:
-        old_path (str): The current path of the file.
-        new_path (str): The destination path of the file.
-
-    Returns:
-        bool: True if successful, False otherwise.
     """
-    log_message(f"Attempting to rename '{old_path}' to '{new_path}'.")
+    print_step(f"Attempting to rename '{old_path}' to '{new_path}'.")
     try:
         os.rename(old_path, new_path)
-        log_message(
-            f"Successfully renamed file to '{os.path.basename(new_path)}'.")
+        print_success(f"Successfully renamed file to '{os.path.basename(new_path)}'.")
         return True
     except FileNotFoundError:
-        log_message(
-            f"Error: Original file '{old_path}' not found for renaming.")
+        print_error(f"Original file '{old_path}' not found for renaming.")
         return False
     except PermissionError:
-        log_message(f"Error: Permission denied when renaming '{old_path}'.")
+        print_error(f"Permission denied when renaming '{old_path}'.")
         return False
     except Exception as e:
-        log_message(f"Error renaming file '{old_path}' to '{new_path}': {e}")
+        print_error(f"Error renaming file '{old_path}' to '{new_path}': {e}")
         return False
-
 
 def rename_associated_files(current_dir: str, old_base_name: str, final_new_base_name: str, new_pdf_name: str) -> None:
     """
     Searches for and renames other files in the directory that share the same old base name.
-
-    Args:
-        current_dir (str): The directory containing the files.
-        old_base_name (str): The original base name of the PDF.
-        final_new_base_name (str): The final new base name (including any counters).
-        new_pdf_name (str): The full new filename of the PDF to ignore it.
+    Includes a progress cycle.
     """
-    log_message(
-        f"Searching for associated files with base name '{old_base_name}' in '{current_dir}'.")
+    print_step(f"Searching for associated files with base name '{old_base_name}' in '{current_dir}'.")
+    success_count = 0
+    fail_count = 0
+    total = 0
+    
     try:
         files_in_dir = os.listdir(current_dir)
-        log_message(
-            f"Found {len(files_in_dir)} files in directory. Filtering associated files.")
+        total = len(files_in_dir)
+        print_success(f"Found {total} files in directory. Filtering associated files.")
 
-        for f in files_in_dir:
+        for idx, f in enumerate(files_in_dir):
+            print_step(f"Checking file for association: {f}")
             f_path = os.path.join(current_dir, f)
             try:
                 if not os.path.isfile(f_path):
@@ -354,153 +338,163 @@ def rename_associated_files(current_dir: str, old_base_name: str, final_new_base
 
                 # Check if this file is an associated file
                 if f_base_name == old_base_name and f != new_pdf_name:
-                    log_message(f"Found associated file: '{f}'")
+                    print_step(f"Found associated file: '{f}'")
                     new_f_name = f"{final_new_base_name}{f_ext}"
                     new_f_path = os.path.join(current_dir, new_f_name)
 
-                    log_message(
-                        f"Checking if target path '{new_f_path}' exists.")
+                    print_step(f"Checking if target path '{new_f_path}' exists.")
                     if os.path.exists(new_f_path):
-                        log_message(
-                            f"Cannot rename '{f}' to '{new_f_name}' because target already exists.")
+                        print_error(f"Cannot rename '{f}' to '{new_f_name}' because target already exists.")
+                        fail_count += 1
                         continue
 
-                    log_message(
-                        f"Attempting to rename associated file '{f}' to '{new_f_name}'.")
+                    print_step(f"Attempting to rename associated file '{f}' to '{new_f_name}'.")
                     if rename_file(f_path, new_f_path):
-                        log_message(
-                            f"Also renamed associated file '{f}' to '{new_f_name}'")
+                        print_success(f"Renamed associated file '{f}' to '{new_f_name}'")
+                        success_count += 1
                     else:
-                        log_message(f"Failed to rename associated file '{f}'.")
+                        print_error(f"Failed to rename associated file '{f}'.")
+                        fail_count += 1
             except Exception as file_err:
-                log_message(
-                    f"Error processing potential associated file '{f}': {file_err}")
-
+                print_error(f"Error processing potential associated file '{f}': {file_err}")
+                fail_count += 1
+                
+            print_progress(idx + 1, total, prefix='Associated Files Progress', suffix='Complete', length=30)
+            
+        print_success("Completed scanning and renaming associated files.")
+        if success_count > 0 or fail_count > 0:
+            print_summary_box("Associated Files Renaming", success_count + fail_count, success_count, fail_count)
+            
     except Exception as e:
-        log_message(f"Error during associated files renaming process: {e}")
+        print_error(f"Error during associated files renaming process: {e}")
 
-
-def rename_pdf_from_summary(file_path: str, pdf_text: str) -> None:
+def rename_pdf_from_summary(file_path: str, pdf_text: str) -> bool:
     """
     Coordinates the process of generating a summary and renaming the PDF and its associated files.
-
-    Args:
-        file_path (str): The path to the PDF file.
-        pdf_text (str): The extracted text from the PDF.
     """
-    log_message(
-        f"Starting renaming process for '{os.path.basename(file_path)}'.")
+    print_step(f"Starting renaming process for '{os.path.basename(file_path)}'.")
 
+    print_step("Calling build_summary_prompt")
     prompt = build_summary_prompt(pdf_text)
     if not prompt:
-        log_message("Failed to build prompt. Aborting rename process.")
-        return
+        print_error("Failed to build prompt. Aborting rename process.")
+        return False
 
+    print_step("Calling get_summary_from_llm")
     summary = get_summary_from_llm(prompt)
     if not summary:
-        log_message("Failed to generate summary. Aborting rename process.")
-        return
+        print_error("Failed to generate summary. Aborting rename process.")
+        return False
 
+    print_step("Calling sanitize_filename")
     new_base_name = sanitize_filename(summary)
     if not new_base_name:
-        log_message("Failed to sanitize filename. Aborting rename process.")
-        return
+        print_error("Failed to sanitize filename. Aborting rename process.")
+        return False
 
     current_dir = os.path.dirname(file_path)
+    
+    print_step("Calling get_unique_new_path")
     new_path = get_unique_new_path(current_dir, new_base_name, file_path)
-
     if not new_path:
-        log_message(
-            "Failed to determine a unique new path. Aborting rename process.")
-        return
+        print_error("Failed to determine a unique new path. Aborting rename process.")
+        return False
 
     old_base_name = os.path.splitext(os.path.basename(file_path))[0]
     new_file_name = os.path.basename(new_path)
     final_new_base_name = os.path.splitext(new_file_name)[0]
 
-    log_message(
-        f"Ready to rename from '{old_base_name}.pdf' to '{new_file_name}'.")
+    print_step(f"Ready to rename from '{old_base_name}.pdf' to '{new_file_name}'.")
     success = rename_file(file_path, new_path)
 
     if success:
-        log_message(
-            "Primary PDF renamed successfully. Proceeding to rename associated files.")
-        rename_associated_files(
-            current_dir, old_base_name, final_new_base_name, new_file_name)
+        print_success("Primary PDF renamed successfully. Proceeding to rename associated files.")
+        rename_associated_files(current_dir, old_base_name, final_new_base_name, new_file_name)
+        return True
     else:
-        log_message(
-            "Primary PDF renaming failed. Associated files will not be renamed.")
-
+        print_error("Primary PDF renaming failed. Associated files will not be renamed.")
+        return False
 
 def process_all_pdfs() -> None:
     """
     Iterates over all PDF files in the current working directory and processes them.
+    Includes a progress cycle.
     """
-    log_message("Starting batch processing of all PDF files.")
+    print_step("Starting batch processing of all PDF files.")
+    success_count = 0
+    fail_count = 0
+    total = 0
+    
     try:
+        print_step("Getting current working directory.")
         current_dir = os.getcwd()
-        log_message(f"Current working directory is: {current_dir}")
-        log_message(f"Scanning for PDF files in: {current_dir}")
+        print_success(f"Current working directory is: {current_dir}")
+        print_step(f"Scanning for PDF files in: {current_dir}")
 
         try:
             files_in_dir = os.listdir(current_dir)
             pdf_files = [f for f in files_in_dir if f.lower().endswith('.pdf')]
+            total = len(pdf_files)
         except Exception as ls_err:
-            log_message(f"Error listing directory contents: {ls_err}")
+            print_error(f"Error listing directory contents: {ls_err}")
             return
 
         if not pdf_files:
-            log_message(
-                "No PDF files found in the current directory. Nothing to do.")
+            print_error("No PDF files found in the current directory. Nothing to do.")
             return
 
-        log_message(f"Found {len(pdf_files)} PDF file(s).")
+        print_success(f"Found {total} PDF file(s).")
 
-        for filename in pdf_files:
+        for idx, filename in enumerate(pdf_files):
+            print_step(f"=== Beginning processing cycle for file: {filename} ({idx+1}/{total}) ===")
             try:
                 file_path = os.path.join(current_dir, filename)
-                log_message(f"=== Processing file: {filename} ===")
-
+                
+                print_step("Extracting text from PDF.")
                 text = extract_pdf_text(file_path)
 
                 if not text:
-                    log_message(
-                        f"Failed to extract text or PDF is empty for: {filename}")
-                    log_message("-" * 40)
-                    continue
+                    print_error(f"Failed to extract text or PDF is empty for: {filename}")
+                    fail_count += 1
+                else:
+                    print_success(f"Extracted {len(text)} characters of text from '{filename}'.")
+                    print_step("Proceeding to rename the PDF.")
+                    rename_success = rename_pdf_from_summary(file_path, text)
+                    if rename_success:
+                        success_count += 1
+                        print_success(f"Fully processed {filename}")
+                    else:
+                        fail_count += 1
+                        print_error(f"Failed to fully process {filename}")
 
-                log_message(
-                    f"Successfully extracted {len(text)} characters of text from '{filename}'.")
-
-                rename_pdf_from_summary(file_path, text)
-
-                log_message(f"=== Finished processing file: {filename} ===")
-                log_message("-" * 40)
             except Exception as file_err:
-                log_message(
-                    f"Unexpected error processing file '{filename}': {file_err}")
-                log_message("-" * 40)
+                print_error(f"Unexpected error processing file '{filename}': {file_err}")
+                fail_count += 1
+                
+            print_progress(idx + 1, total, prefix='Batch Processing Progress', suffix='Complete', length=30)
+            
+        print_success("Batch processing cycle complete.")
+        print_summary_box("Batch PDF Processing Cycle", total, success_count, fail_count)
 
     except Exception as e:
-        log_message(f"Critical error during batch processing: {e}")
-
+        print_error(f"Critical error during batch processing: {e}")
+        print_summary_box("Batch PDF Processing Cycle (Interrupted)", total, success_count, fail_count)
 
 def main() -> None:
     """
     Main application entry point.
     """
-    log_message("Batch PDF Renamer started.")
+    print_step("Batch PDF Renamer started.")
     try:
         process_all_pdfs()
     except Exception as e:
-        log_message(f"Error in main execution block: {e}")
-    log_message("Batch PDF Renamer finished.")
-
+        print_error(f"Error in main execution block: {e}")
+    print_success("Batch PDF Renamer finished.")
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        log_message("Process interrupted by user. Exiting.")
+        print_error("Process interrupted by user. Exiting.")
     except Exception as e:
-        log_message(f"Fatal error: {e}")
+        print_error(f"Fatal error: {e}")
