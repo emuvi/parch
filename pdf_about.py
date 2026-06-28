@@ -7,7 +7,10 @@ import traceback
 import PyPDF2
 from PyPDF2.errors import PdfReadError
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
+import spacy
+from langdetect import detect
+import importlib
 
 from lmstd import LMStd, ChatResponse
 
@@ -43,6 +46,117 @@ def print_summary_box(title: str, total: int, successes: int, fails: int) -> Non
     print("║" + f"Successes:       {successes}".ljust(box_width - 2) + "║")
     print("║" + f"Failures:        {fails}".ljust(box_width - 2) + "║")
     print("╚" + "═" * (box_width - 2) + "╝\n")
+
+# --- NLP Functions ---
+
+# Global cache for loaded Spacy models
+nlp_models_cache: Dict[str, Any] = {}
+
+def load_spacy_model(lang_code: str) -> Any:
+    """Loads spacy and the appropriate NLP model based on language."""
+    func_name = "Load Spacy Model"
+    spacy_models_map: Dict[str, str] = {
+        "pt": "pt_core_news_sm",
+        "en": "en_core_web_sm",
+        "es": "es_core_news_sm",
+        "it": "it_core_news_sm",
+        "de": "de_core_news_sm",
+        "fr": "fr_core_news_sm",
+        "nl": "nl_core_news_sm",
+        "el": "el_core_news_sm",
+        "ru": "ru_core_news_sm",
+        "xx": "xx_ent_wiki_sm"
+    }
+    model_name = spacy_models_map.get(lang_code, "xx_ent_wiki_sm")
+    
+    try:
+        print_step(func_name, f"Loading Spacy model for language '{lang_code}'")
+        
+        if model_name in nlp_models_cache:
+            print_success(func_name, f"Found in cache: {model_name}")
+            return nlp_models_cache[model_name]
+
+        try:
+            model_module = importlib.import_module(model_name)
+            model = model_module.load()
+            nlp_models_cache[model_name] = model
+            print_success(func_name, f"Loaded dynamically: {model_name}")
+            return model
+        except (ImportError, AttributeError):
+            model = spacy.load(model_name)
+            nlp_models_cache[model_name] = model
+            print_success(func_name, f"Loaded via spacy.load: {model_name}")
+            return model
+    except Exception as e:
+        print_error(func_name, str(e))
+        log_message(f"Error: Spacy model '{model_name}' could not be loaded ({e}).")
+        raise RuntimeError(f"Spacy model '{model_name}' not loaded: {e}")
+
+def abbreviate_words(text: str, nlp_model: Any, target_pos: List[str], preserve_first: bool = True) -> str:
+    """Abbreviates words in text matching specific POS tags."""
+    func_name = "Abbreviate Words"
+    try:
+        print_step(func_name, "Abbreviating words based on POS tags.")
+        if not text or text.upper() == "EMPTY":
+            print_success(func_name, "Empty text")
+            return ""
+
+        doc = nlp_model(text)
+        out = ""
+        first_alpha_seen = False
+
+        for token in doc:
+            word = token.text
+            has_alpha = any(c.isalpha() for c in word)
+
+            is_candidate = token.pos_ in target_pos and has_alpha and len(word) > 2
+
+            if has_alpha and preserve_first and not first_alpha_seen:
+                is_candidate = False
+                first_alpha_seen = True
+
+            if is_candidate:
+                out += word[0] + "." + token.whitespace_
+            else:
+                out += word + token.whitespace_
+
+        res = out.strip()
+        print_success(func_name, f"Abbreviated result length: {len(res)}")
+        return res
+    except Exception as e:
+        print_error(func_name, f"Failed to abbreviate words: {e}")
+        return text
+
+def apply_abbreviation_phases(summary: str, nlp_model: Any) -> str:
+    """Applies progressive abbreviation rules to the summary if it exceeds 240 chars."""
+    func_name = "Apply Abbreviation Phases"
+    if len(summary) <= 240:
+        return summary
+    
+    print_step(func_name, "Summary > 240 chars. Applying NLP abbreviation phases.")
+    
+    # Phase 1: Abbreviate Adverbs (ADV)
+    adv_pos = ["ADV"]
+    summary = abbreviate_words(summary, nlp_model, adv_pos)
+    if len(summary) <= 240: return summary
+    
+    # Phase 2: Abbreviate Adjectives and Verbs (ADJ, VERB)
+    adj_verb_pos = ["ADJ", "VERB"]
+    summary = abbreviate_words(summary, nlp_model, adj_verb_pos)
+    if len(summary) <= 240: return summary
+    
+    # Phase 3: Abbreviate Nouns and Proper Nouns (NOUN, PROPN)
+    noun_pos = ["NOUN", "PROPN"]
+    summary = abbreviate_words(summary, nlp_model, noun_pos)
+    if len(summary) <= 240: return summary
+    
+    # Phase 4: Abbreviate all
+    all_pos = ["ADV", "ADJ", "VERB", "NOUN", "PROPN"]
+    summary = abbreviate_words(summary, nlp_model, all_pos)
+    
+    print_success(func_name, "Completed NLP abbreviation phases.")
+    return summary
+
 
 # --- Client Initialization ---
 
@@ -147,7 +261,7 @@ def build_summary_prompt(text: str) -> str:
         truncated_text = text[:4000]
         prompt = (
             "Based on the following text extracted from a PDF, tell me what it is about "
-            "in a maximum of 100 characters. Be concise and direct, providing only the summary "
+            "in a maximum of 240 characters. Be concise and direct, providing only the summary "
             "without conversational filler. Do not use quotes or special characters that "
             "are invalid in filenames. Respond in the exact same language as the provided text, "
             "and ensure perfect spell checking on the language of the document.\n\n"
@@ -211,8 +325,8 @@ def sanitize_filename(summary: str) -> Optional[str]:
                 summary = summary[:-3]
         summary = summary.strip()
 
-        if len(summary) > 100:
-            summary = summary[:100].strip()
+        if len(summary) > 240:
+            summary = summary[:240].strip()
 
         new_base_name = re.sub(r'[\\/*?:"<>|\n\r\t]', "_", summary)
         new_base_name = re.sub(r'_{2,}', "_", new_base_name).strip(" _.")
@@ -373,6 +487,13 @@ def process_single_file(client: LMStd, file: str, current_dir: str) -> bool:
     if not llm_response:
         mark_file_with_suffix(file, current_dir, "(SUMMARY_FAILED)")
         return False
+
+    try:
+        lang_code = detect(llm_response)
+    except Exception:
+        lang_code = "xx"
+    current_nlp = load_spacy_model(lang_code)
+    llm_response = apply_abbreviation_phases(llm_response, current_nlp)
 
     new_base_name = sanitize_filename(llm_response)
     if not new_base_name:
