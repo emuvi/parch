@@ -133,30 +133,14 @@ def _derive_keys(password: str, salt: bytes) -> tuple[bytes, bytes]:
         UnicodeEncodeError: If `password` cannot be encoded as UTF-8.
         ValueError: If key derivation parameters are invalid.
     """
-    log_step(
-        "_derive_keys",
-        f"Starting key derivation (algorithm={HASH_ALGORITHM}, iterations={PBKDF2_ITERATIONS}, salt_bytes={len(salt)})",
+    key_material = hashlib.pbkdf2_hmac(
+        HASH_ALGORITHM,
+        password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+        dklen=KEY_SIZE * 2,
     )
-    try:
-        key_material = hashlib.pbkdf2_hmac(
-            HASH_ALGORITHM,
-            password.encode("utf-8"),
-            salt,
-            PBKDF2_ITERATIONS,
-            dklen=KEY_SIZE * 2,
-        )
-        enc_key, mac_key = key_material[:KEY_SIZE], key_material[KEY_SIZE:]
-        log_success(
-            "_derive_keys",
-            f"Completed key derivation (enc_key_bytes={len(enc_key)}, mac_key_bytes={len(mac_key)})",
-        )
-        return enc_key, mac_key
-    except Exception as exc:
-        log_error(
-            "_derive_keys",
-            f"Key derivation failed: {exc}. Why: Invalid password encoding or OpenSSL error. Fix: Ensure UTF-8 compatible password input.",
-        )
-        raise
+    return key_material[:KEY_SIZE], key_material[KEY_SIZE:]
 
 
 def _xor_keystream(data: bytes, enc_key: bytes, nonce: bytes) -> bytes:
@@ -174,24 +158,10 @@ def _xor_keystream(data: bytes, enc_key: bytes, nonce: bytes) -> bytes:
     Raises:
         TypeError: If `data`, `enc_key`, or `nonce` is not a bytes-like object.
     """
-    log_step(
-        "_xor_keystream",
-        f"Starting SHAKE-256 stream transformation (data_bytes={len(data)}, nonce_bytes={len(nonce)})",
-    )
-    try:
-        if not data:
-            log_success("_xor_keystream", "Completed stream transformation on empty payload (0 bytes)")
-            return b""
-        keystream = hashlib.shake_256(enc_key + nonce).digest(len(data))
-        result = bytes(a ^ b for a, b in zip(data, keystream))
-        log_success("_xor_keystream", f"Completed stream transformation (output_bytes={len(result)})")
-        return result
-    except Exception as exc:
-        log_error(
-            "_xor_keystream",
-            f"Stream transformation failed: {exc}. Why: Unexpected key/nonce state. Fix: Verify key and nonce byte lengths.",
-        )
-        raise
+    if not data:
+        return b""
+    keystream = hashlib.shake_256(enc_key + nonce).digest(len(data))
+    return bytes(a ^ b for a, b in zip(data, keystream))
 
 
 def _compute_mac(mac_key: bytes, salt: bytes, nonce: bytes, ciphertext: bytes) -> bytes:
@@ -209,20 +179,7 @@ def _compute_mac(mac_key: bytes, salt: bytes, nonce: bytes, ciphertext: bytes) -
     Raises:
         TypeError: If any input argument is not a valid bytes-like object.
     """
-    log_step(
-        "_compute_mac",
-        f"Starting HMAC-SHA256 computation (ciphertext_bytes={len(ciphertext)})",
-    )
-    try:
-        tag = hmac.new(mac_key, salt + nonce + ciphertext, hashlib.sha256).digest()
-        log_success("_compute_mac", f"Completed HMAC-SHA256 tag generation (tag_bytes={len(tag)})")
-        return tag
-    except Exception as exc:
-        log_error(
-            "_compute_mac",
-            f"HMAC computation failed: {exc}. Why: Invalid byte inputs. Fix: Ensure mac_key, salt, nonce, and ciphertext are valid bytes.",
-        )
-        raise
+    return hmac.new(mac_key, salt + nonce + ciphertext, hashlib.sha256).digest()
 
 
 def _unpack_payload(encoded_payload: bytes) -> tuple[bytes, bytes, bytes, bytes]:
@@ -239,40 +196,27 @@ def _unpack_payload(encoded_payload: bytes) -> tuple[bytes, bytes, bytes, bytes]
         ValueError: If `encoded_payload` contains invalid Base64 data or decodes
             to fewer than `HEADER_SIZE` bytes.
     """
-    log_step(
-        "_unpack_payload",
-        f"Starting payload unpacking (encoded_bytes={len(encoded_payload)}, min_header_bytes={HEADER_SIZE})",
-    )
     try:
         payload = base64.b64decode(encoded_payload.strip(), validate=True)
     except Exception as exc:
-        error_msg = (
+        raise ValueError(
             f"Base64 decoding failed: {exc}. "
             "Why: '.env-crypt' contains non-base64 characters or is corrupted. "
             "Fix: Restore a valid '.env-crypt' file from version control or re-encrypt '.env'."
-        )
-        log_error("_unpack_payload", error_msg)
-        raise ValueError(error_msg) from exc
+        ) from exc
 
     if len(payload) < HEADER_SIZE:
-        error_msg = (
+        raise ValueError(
             f"Payload too short ({len(payload)} bytes < expected minimum {HEADER_SIZE} bytes). "
             "Why: '.env-crypt' is truncated or incomplete. "
             "Fix: Restore the complete '.env-crypt' file and retry."
         )
-        log_error("_unpack_payload", error_msg)
-        raise ValueError(error_msg)
 
     salt = payload[:SALT_SIZE]
     nonce_end = SALT_SIZE + NONCE_SIZE
     nonce = payload[SALT_SIZE:nonce_end]
     tag = payload[nonce_end:HEADER_SIZE]
     ciphertext = payload[HEADER_SIZE:]
-
-    log_success(
-        "_unpack_payload",
-        f"Completed unpacking payload (salt={len(salt)}B, nonce={len(nonce)}B, tag={len(tag)}B, ciphertext={len(ciphertext)}B)",
-    )
     return salt, nonce, tag, ciphertext
 
 
@@ -293,28 +237,15 @@ def encrypt_data(plaintext: bytes, password: str) -> bytes:
     Raises:
         Exception: If key derivation, keystream encryption, or MAC generation fails.
     """
-    log_step("encrypt_data", f"Starting encryption (plaintext_bytes={len(plaintext)})")
-    try:
-        salt = secrets.token_bytes(SALT_SIZE)
-        nonce = secrets.token_bytes(NONCE_SIZE)
-        enc_key, mac_key = _derive_keys(password, salt)
+    salt = secrets.token_bytes(SALT_SIZE)
+    nonce = secrets.token_bytes(NONCE_SIZE)
+    enc_key, mac_key = _derive_keys(password, salt)
 
-        ciphertext = _xor_keystream(plaintext, enc_key, nonce)
-        tag = _compute_mac(mac_key, salt, nonce, ciphertext)
+    ciphertext = _xor_keystream(plaintext, enc_key, nonce)
+    tag = _compute_mac(mac_key, salt, nonce, ciphertext)
 
-        payload = salt + nonce + tag + ciphertext
-        encoded = base64.b64encode(payload)
-        log_success(
-            "encrypt_data",
-            f"Completed encryption (raw_payload_bytes={len(payload)}, base64_bytes={len(encoded)})",
-        )
-        return encoded
-    except Exception as exc:
-        log_error(
-            "encrypt_data",
-            f"Encryption failed: {exc}. Why: Cryptographic step encountered an error. Fix: Check input file and password.",
-        )
-        raise
+    payload = salt + nonce + tag + ciphertext
+    return base64.b64encode(payload)
 
 
 def decrypt_data(encoded_payload: bytes, password: str) -> bytes:
@@ -332,32 +263,18 @@ def decrypt_data(encoded_payload: bytes, password: str) -> bytes:
             the derived authentication key.
         Exception: If an unexpected cryptographic error occurs during decryption.
     """
-    log_step("decrypt_data", f"Starting decryption (encoded_bytes={len(encoded_payload)})")
-    try:
-        salt, nonce, tag, ciphertext = _unpack_payload(encoded_payload)
-        enc_key, mac_key = _derive_keys(password, salt)
-        expected_tag = _compute_mac(mac_key, salt, nonce, ciphertext)
+    salt, nonce, tag, ciphertext = _unpack_payload(encoded_payload)
+    enc_key, mac_key = _derive_keys(password, salt)
+    expected_tag = _compute_mac(mac_key, salt, nonce, ciphertext)
 
-        if not hmac.compare_digest(tag, expected_tag):
-            error_msg = (
-                "HMAC authentication failed. "
-                "Why: The provided password is incorrect or '.env-crypt' has been modified. "
-                "Fix: Re-run the script and enter the exact password used during encryption."
-            )
-            log_error("decrypt_data", error_msg)
-            raise ValueError(error_msg)
-
-        plaintext = _xor_keystream(ciphertext, enc_key, nonce)
-        log_success("decrypt_data", f"Completed decryption and verified integrity (plaintext_bytes={len(plaintext)})")
-        return plaintext
-    except ValueError:
-        raise
-    except Exception as exc:
-        log_error(
-            "decrypt_data",
-            f"Unexpected decryption failure: {exc}. Why: Internal cryptographic error. Fix: Verify '.env-crypt' integrity.",
+    if not hmac.compare_digest(tag, expected_tag):
+        raise ValueError(
+            "HMAC authentication failed. "
+            "Why: The provided password is incorrect or '.env-crypt' has been modified. "
+            "Fix: Re-run the script and enter the exact password used during encryption."
         )
-        raise
+
+    return _xor_keystream(ciphertext, enc_key, nonce)
 
 
 def prompt_password(prompt_text: str) -> str:
@@ -373,28 +290,22 @@ def prompt_password(prompt_text: str) -> str:
         ValueError: If the user cancels input (`EOFError` or `KeyboardInterrupt`)
             or submits an empty password.
     """
-    log_step("prompt_password", f"Starting password prompt (prompt='{prompt_text.strip()}')")
     try:
         password = getpass.getpass(prompt_text)
     except (EOFError, KeyboardInterrupt) as exc:
-        error_msg = (
+        raise ValueError(
             "Password input cancelled by user. "
             "Why: Received EOF or interrupt signal. "
             "Fix: Re-run the script and provide a password when prompted."
-        )
-        log_error("prompt_password", error_msg)
-        raise ValueError(error_msg) from exc
+        ) from exc
 
     if not password:
-        error_msg = (
+        raise ValueError(
             "Password cannot be empty. "
             "Why: Blank password submitted. "
             "Fix: Re-run the script and enter a non-empty password."
         )
-        log_error("prompt_password", error_msg)
-        raise ValueError(error_msg)
 
-    log_success("prompt_password", "Completed password input (non-empty password received)")
     return password
 
 
@@ -409,26 +320,15 @@ def _encrypt_env_file(env_path: Path, crypt_path: Path) -> None:
         ValueError: If password input fails validation.
         OSError: If reading `env_path` or writing `crypt_path` fails.
     """
-    log_step("_encrypt_env_file", f"Starting file encryption (source='{env_path}', target='{crypt_path}')")
-    try:
-        password = prompt_password(f"Enter password to encrypt {env_path}: ")
-        plaintext = env_path.read_bytes()
-        log_info("_encrypt_env_file", f"Read {len(plaintext)} bytes from '{env_path}'")
-
-        encrypted = encrypt_data(plaintext, password)
-        crypt_path.write_bytes(encrypted + b"\n")
-        log_success(
-            "_encrypt_env_file",
-            f"Completed encrypting '{env_path}' -> '{crypt_path}' ({len(encrypted) + 1} bytes written)",
-        )
-    except Exception as exc:
-        log_error(
-            "_encrypt_env_file",
-            f"Failed to encrypt '{env_path}' -> '{crypt_path}': {exc}. "
-            "Why: File I/O or encryption step failed. "
-            "Fix: Check file permissions on current directory and ensure a valid password is provided.",
-        )
-        raise
+    log_step("_encrypt_env_file", f"Encrypting '{env_path.name}' -> '{crypt_path.name}'")
+    password = prompt_password(f"Enter password to encrypt {env_path.name}: ")
+    plaintext = env_path.read_bytes()
+    encrypted = encrypt_data(plaintext, password)
+    crypt_path.write_bytes(encrypted + b"\n")
+    log_success(
+        "_encrypt_env_file",
+        f"Encrypted '{env_path.name}' -> '{crypt_path.name}' ({len(encrypted) + 1} bytes written)",
+    )
 
 
 def _decrypt_env_file(crypt_path: Path, env_path: Path) -> None:
@@ -442,26 +342,15 @@ def _decrypt_env_file(crypt_path: Path, env_path: Path) -> None:
         ValueError: If password input fails or payload authentication/decryption fails.
         OSError: If reading `crypt_path` or writing `env_path` fails.
     """
-    log_step("_decrypt_env_file", f"Starting file decryption (source='{crypt_path}', target='{env_path}')")
-    try:
-        password = prompt_password(f"Enter password to decrypt {crypt_path}: ")
-        encoded_payload = crypt_path.read_bytes()
-        log_info("_decrypt_env_file", f"Read {len(encoded_payload)} bytes from '{crypt_path}'")
-
-        plaintext = decrypt_data(encoded_payload, password)
-        env_path.write_bytes(plaintext)
-        log_success(
-            "_decrypt_env_file",
-            f"Completed decrypting '{crypt_path}' -> '{env_path}' ({len(plaintext)} bytes written)",
-        )
-    except Exception as exc:
-        log_error(
-            "_decrypt_env_file",
-            f"Failed to decrypt '{crypt_path}' -> '{env_path}': {exc}. "
-            "Why: Password mismatch, corrupted payload, or file permission issue. "
-            "Fix: Verify the password and check write permissions for '.env'.",
-        )
-        raise
+    log_step("_decrypt_env_file", f"Decrypting '{crypt_path.name}' -> '{env_path.name}'")
+    password = prompt_password(f"Enter password to decrypt {crypt_path.name}: ")
+    encoded_payload = crypt_path.read_bytes()
+    plaintext = decrypt_data(encoded_payload, password)
+    env_path.write_bytes(plaintext)
+    log_success(
+        "_decrypt_env_file",
+        f"Decrypted '{crypt_path.name}' -> '{env_path.name}' ({len(plaintext)} bytes written)",
+    )
 
 
 def _discover_operations(env_path: Path, crypt_path: Path) -> list[tuple[str, Path, Path]]:
@@ -483,120 +372,27 @@ def _discover_operations(env_path: Path, crypt_path: Path) -> list[tuple[str, Pa
     Raises:
         OSError: If checking file existence on the filesystem fails.
     """
-    log_step(
-        "_discover_operations",
-        f"Starting directory inspection (env_path='{env_path}', crypt_path='{crypt_path}')",
-    )
-    try:
-        has_env = env_path.is_file()
-        has_crypt = crypt_path.is_file()
+    has_env = env_path.is_file()
+    has_crypt = crypt_path.is_file()
+
+    if has_env and has_crypt:
         log_info(
             "_discover_operations",
-            f"File presence check: {env_path}_exists={has_env}, {crypt_path}_exists={has_crypt}",
+            f"Both '{env_path.name}' and '{crypt_path.name}' exist; no action required.",
         )
-
-        if has_env and has_crypt:
-            log_info(
-                "_discover_operations",
-                f"Both '{env_path}' and '{crypt_path}' exist; no action required.",
-            )
-            log_success("_discover_operations", "Completed discovery (0 operations queued)")
-            return []
-
-        if has_env and not has_crypt:
-            operations = [("encrypt", env_path, crypt_path)]
-            log_success(
-                "_discover_operations",
-                f"Completed discovery (1 operation queued: encrypt '{env_path}' -> '{crypt_path}')",
-            )
-            return operations
-
-        if has_crypt and not has_env:
-            operations = [("decrypt", crypt_path, env_path)]
-            log_success(
-                "_discover_operations",
-                f"Completed discovery (1 operation queued: decrypt '{crypt_path}' -> '{env_path}')",
-            )
-            return operations
-
-        log_info(
-            "_discover_operations",
-            f"Neither '{env_path}' nor '{crypt_path}' was found in the current directory.",
-        )
-        log_success("_discover_operations", "Completed discovery (0 operations queued)")
         return []
-    except Exception as exc:
-        log_error(
-            "_discover_operations",
-            f"Failed to inspect directory for '{env_path}' and '{crypt_path}': {exc}. "
-            "Why: File system check raised an error. "
-            "Fix: Verify read permissions on the current working directory.",
-        )
-        raise
 
+    if has_env and not has_crypt:
+        return [("encrypt", env_path, crypt_path)]
 
-def _process_operations(operations: list[tuple[str, Path, Path]]) -> tuple[int, int, int]:
-    """Execute queued encryption or decryption operations and track outcome counts.
-
-    Args:
-        operations (list[tuple[str, Path, Path]]): Sequence of
-            `(operation, source_path, target_path)` tuples to process.
-
-    Returns:
-        tuple[int, int, int]: A 3-tuple `(total_processed, successes, failures)`
-            summarizing execution outcomes.
-    """
-    total_items = len(operations)
-    log_step("_process_operations", f"Starting operation cycle (total_items={total_items})")
-
-    total_processed = 0
-    successes = 0
-    failures = 0
-
-    for index, (operation, source_path, target_path) in enumerate(operations, start=1):
-        log_step(
-            "operation_cycle",
-            f"Processing item {index} of {total_items}",
-        )
-        log_info(
-            "operation_cycle",
-            f"Processing: {source_path} with operation='{operation}', target='{target_path}'",
-        )
-        total_processed += 1
-
-        try:
-            if operation == "encrypt":
-                _encrypt_env_file(source_path, target_path)
-            elif operation == "decrypt":
-                _decrypt_env_file(source_path, target_path)
-            else:
-                raise ValueError(
-                    f"Unsupported operation '{operation}'. "
-                    "Why: Operation must be 'encrypt' or 'decrypt'. "
-                    "Fix: Use a supported operation name."
-                )
-
-            successes += 1
-            log_success(
-                operation,
-                f"Successfully completed '{operation}' from '{source_path}' to '{target_path}'",
-            )
-        except Exception as exc:
-            failures += 1
-            log_error(
-                operation,
-                f"Operation '{operation}' failed for '{source_path}' -> '{target_path}': {exc}",
-            )
+    if has_crypt and not has_env:
+        return [("decrypt", crypt_path, env_path)]
 
     log_info(
-        "operation_cycle",
-        f"Cycle summary: total_processed={total_processed}, successes={successes}, failures={failures}",
+        "_discover_operations",
+        f"Neither '{env_path.name}' nor '{crypt_path.name}' was found in the current directory.",
     )
-    log_success(
-        "_process_operations",
-        f"Completed operation cycle (total_processed={total_processed}, successes={successes}, failures={failures})",
-    )
-    return total_processed, successes, failures
+    return []
 
 
 def main() -> int:
@@ -610,11 +406,6 @@ def main() -> int:
     env_path = working_dir / ENV_PATH.name
     crypt_path = working_dir / CRYPT_PATH.name
 
-    log_step(
-        "main",
-        f"Starting env_cript workflow (working_dir='{working_dir}', env='{env_path.name}', crypt='{crypt_path.name}')",
-    )
-
     try:
         operations = _discover_operations(env_path, crypt_path)
     except Exception as exc:
@@ -625,65 +416,23 @@ def main() -> int:
         return 1
 
     if not operations:
-        log_info("main", "No pending encryption or decryption operations found. Exiting cleanly.")
         return 0
 
-    total_items = len(operations)
-    total_processed = 0
-    successes = 0
     failures = 0
 
-    log_step("main", f"Starting processing phase (queued_items={total_items})")
-
-    for index, (operation, source_path, target_path) in enumerate(operations, start=1):
-        log_step("operation_cycle", f"Processing item {index} of {total_items}")
-        log_info(
-            "operation_cycle",
-            f"Processing: {source_path.name} with operation='{operation}', target='{target_path.name}'",
-        )
-        total_processed += 1
-
+    for operation, source_path, target_path in operations:
         try:
             if operation == "encrypt":
                 _encrypt_env_file(source_path, target_path)
             elif operation == "decrypt":
                 _decrypt_env_file(source_path, target_path)
             else:
-                raise ValueError(
-                    f"Unsupported operation '{operation}'. "
-                    "Why: Operation must be 'encrypt' or 'decrypt'. "
-                    "Fix: Use a supported operation name."
-                )
-
-            successes += 1
-            log_success(
-                operation,
-                f"Successfully completed '{operation}' from '{source_path.name}' to '{target_path.name}'",
-            )
+                raise ValueError(f"Unsupported operation '{operation}'.")
         except Exception as exc:
             failures += 1
-            log_error(
-                operation,
-                f"Operation '{operation}' failed for '{source_path.name}' -> '{target_path.name}': {exc}",
-            )
+            log_error(operation, str(exc))
 
-    log_info(
-        "operation_cycle",
-        f"Cycle summary: total_processed={total_processed}, successes={successes}, failures={failures}",
-    )
-
-    if failures > 0:
-        log_error(
-            "main",
-            f"Workflow completed with errors (total_processed={total_processed}, successes={successes}, failures={failures})",
-        )
-        return 1
-
-    log_success(
-        "main",
-        f"Workflow completed successfully (total_processed={total_processed}, successes={successes}, failures={failures})",
-    )
-    return 0
+    return 1 if failures > 0 else 0
 
 
 if __name__ == "__main__":
