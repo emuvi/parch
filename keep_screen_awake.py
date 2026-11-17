@@ -12,7 +12,8 @@ Linux requires an X11 session; native Wayland is not supported. On macOS,
 grant the terminal or Python permission to control the computer in Privacy &
 Security > Accessibility.
 
-Run with ``python keep_screen_awake.py`` and press Ctrl+C to stop. The wakefulness
+Run with ``python keep_screen_awake.py`` (or ``keep_screen_awake.bat`` on
+Windows) and press Ctrl+C to stop. The wakefulness
 request is cleared on exit. Screen savers, security policies, manual locking,
 or desktop environments that ignore inhibition can still lock the session.
 """
