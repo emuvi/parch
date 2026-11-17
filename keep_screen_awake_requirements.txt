@@ -1,0 +1,4 @@
+wakepy>=1.0,<2; sys_platform == "linux" or sys_platform == "darwin"
+pynput>=1.7,<2; sys_platform == "linux"
+screeninfo>=0.8,<1; sys_platform == "linux"
+pyobjc-framework-Quartz>=10; sys_platform == "darwin"
