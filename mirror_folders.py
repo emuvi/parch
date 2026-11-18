@@ -1,5 +1,15 @@
 import os
 import shutil
+from pathlib import Path
+import stat
+
+def handle_remove_readonly(func, path, exc):
+    """Remove read-only file attributes to allow deletion on Windows."""
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR | stat.S_IRUSR)
+        func(path)
+    else:
+        raise exc
 
 def synchronize_folders(source_folder, destination_folder):
     """
@@ -106,7 +116,7 @@ def synchronize_folders(source_folder, destination_folder):
         if relative_path != ".":
             if not os.path.exists(current_source_path):
                 try:
-                    os.rmdir(root)
+                    shutil.rmtree(root, onerror=handle_remove_readonly)
                     print(f"🗑️ Deleted subfolder not in source: {relative_path}")
                     operations["folders_deleted"] += 1
                 except Exception as e:
