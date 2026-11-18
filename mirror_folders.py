@@ -36,7 +36,7 @@ def _remove(path, directory=False, attempts=3):
             action(path)
             return
         except PermissionError:
-            if not directory and not _is_link_or_junction(path):
+            if (not directory or os.name == "nt") and not _is_link_or_junction(path):
                 mode = os.stat(path).st_mode
                 if not mode & stat.S_IWRITE:
                     os.chmod(path, mode | stat.S_IWRITE)
